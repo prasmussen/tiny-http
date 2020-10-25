@@ -52,9 +52,6 @@ pub struct Request {
 
     remote_addr: SocketAddr,
 
-    // true if HTTPS, false if HTTP
-    secure: bool,
-
     method: Method,
 
     path: String,
@@ -121,7 +118,6 @@ impl From<IoError> for RequestCreationError {
 ///
 /// The `Write` object will be used by the `Request` to write the response.
 pub fn new_request<R, W>(
-    secure: bool,
     method: Method,
     path: String,
     version: HTTPVersion,
@@ -224,7 +220,6 @@ where
         data_reader: Some(reader),
         response_writer: Some(Box::new(writer) as Box<dyn Write + Send + 'static>),
         remote_addr,
-        secure,
         method,
         path,
         http_version: version,
@@ -236,12 +231,6 @@ where
 }
 
 impl Request {
-    /// Returns true if the request was made through HTTPS.
-    #[inline]
-    pub fn secure(&self) -> bool {
-        self.secure
-    }
-
     /// Returns the method requested by the client (eg. `GET`, `POST`, etc.).
     #[inline]
     pub fn method(&self) -> &Method {
@@ -451,11 +440,6 @@ impl Request {
         };
 
         writer.flush()
-    }
-
-    pub(crate) fn with_notify_sender(mut self, sender: Sender<()>) -> Self {
-        self.notify_when_responded = Some(sender);
-        self
     }
 }
 

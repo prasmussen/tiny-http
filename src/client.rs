@@ -32,9 +32,6 @@ pub struct ClientConnection {
 
     // set to true if we know that the previous request is the last one
     no_more_requests: bool,
-
-    // true if the connection goes through SSL
-    secure: bool,
 }
 
 /// Error that can happen when reading a request.
@@ -55,7 +52,6 @@ impl ClientConnection {
         mut read_socket: RefinedTcpStream,
     ) -> ClientConnection {
         let remote_addr = read_socket.peer_addr();
-        let secure = read_socket.secure();
 
         let mut source = SequentialReaderBuilder::new(BufReader::with_capacity(1024, read_socket));
         let first_header = source.next().unwrap();
@@ -66,13 +62,7 @@ impl ClientConnection {
             remote_addr,
             next_header_source: first_header,
             no_more_requests: false,
-            secure,
         }
-    }
-
-    /// true if the connection is HTTPS
-    pub fn secure(&self) -> bool {
-        self.secure
     }
 
     /// Reads the next line from self.next_header_source.
@@ -147,7 +137,6 @@ impl ClientConnection {
 
         // building the next reader
         let request = ::request::new_request(
-            self.secure,
             method,
             path,
             version.clone(),

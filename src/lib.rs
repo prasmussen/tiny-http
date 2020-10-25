@@ -101,9 +101,6 @@ extern crate chrono;
 extern crate chunked_transfer;
 extern crate url;
 
-#[cfg(feature = "ssl")]
-extern crate openssl;
-
 use std::error::Error;
 use std::io::Error as IoError;
 use std::io::Result as IoResult;
@@ -111,7 +108,6 @@ use std::net;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -181,19 +177,8 @@ where
 {
     /// The addresses to listen to.
     pub addr: A,
-
-    /// If `Some`, then the server will use SSL to encode the communications.
-    pub ssl: Option<SslConfig>,
 }
 
-/// Configuration of the server for SSL.
-#[derive(Debug, Clone)]
-pub struct SslConfig {
-    /// Contains the public certificate to send to clients.
-    pub certificate: Vec<u8>,
-    /// Contains the ultra-secret private key used to decode communications.
-    pub private_key: Vec<u8>,
-}
 
 impl Server {
     /// Shortcut for a simple server on a specific address.
@@ -202,23 +187,7 @@ impl Server {
     where
         A: ToSocketAddrs,
     {
-        Server::new(ServerConfig { addr, ssl: None })
-    }
-
-    /// Shortcut for an HTTPS server on a specific address.
-    #[cfg(feature = "ssl")]
-    #[inline]
-    pub fn https<A>(
-        addr: A,
-        config: SslConfig,
-    ) -> Result<Server, Box<Error + Send + Sync + 'static>>
-    where
-        A: ToSocketAddrs,
-    {
-        Server::new(ServerConfig {
-            addr: addr,
-            ssl: Some(config),
-        })
+        Server::new(ServerConfig { addr })
     }
 
     /// Builds a new server that listens on the specified address.
@@ -237,51 +206,6 @@ impl Server {
             (Arc::new(listener), local_addr)
         };
 
-        // building the SSL capabilities
-        #[cfg(feature = "ssl")]
-        type SslContext = openssl::ssl::SslContext;
-        #[cfg(not(feature = "ssl"))]
-        type SslContext = ();
-        let ssl: Option<SslContext> = match config.ssl {
-            #[cfg(feature = "ssl")]
-            Some(mut config) => {
-                use openssl::pkey::PKey;
-                use openssl::ssl;
-                use openssl::ssl::SslVerifyMode;
-                use openssl::x509::X509;
-
-                let mut ctxt = try!(SslContext::builder(ssl::SslMethod::tls()));
-                try!(ctxt.set_cipher_list("DEFAULT"));
-                let certificate = try!(X509::from_pem(&config.certificate[..]));
-                try!(ctxt.set_certificate(&certificate));
-                let private_key = try!(PKey::private_key_from_pem(&config.private_key[..]));
-                try!(ctxt.set_private_key(&private_key));
-                ctxt.set_verify(SslVerifyMode::NONE);
-                try!(ctxt.check_private_key());
-
-                // let's wipe the certificate and private key from memory, because we're
-                // better safe than sorry
-                for b in &mut config.certificate {
-                    *b = 0;
-                }
-                for b in &mut config.private_key {
-                    *b = 0;
-                }
-
-                Some(ctxt.build())
-            }
-            #[cfg(not(feature = "ssl"))]
-            Some(_) => {
-                return Err(
-                    "Building a server with SSL requires enabling the `ssl` feature \
-                                   in tiny-http"
-                        .to_owned()
-                        .into(),
-                )
-            }
-            None => None,
-        };
-
         // creating a task where server.accept() is continuously called
         // and ClientConnection objects are pushed in the messages queue
         let messages = MessagesQueue::with_capacity(8);
@@ -297,24 +221,7 @@ impl Server {
                     let new_client = match server.accept() {
                         Ok((sock, _)) => {
                             use util::RefinedTcpStream;
-                            let (read_closable, write_closable) = match ssl {
-                                None => RefinedTcpStream::new(sock),
-                                #[cfg(feature = "ssl")]
-                                Some(ref ssl) => {
-                                    let ssl = openssl::ssl::Ssl::new(ssl).expect("Couldn't create ssl");
-                                    // trying to apply SSL over the connection
-                                    // if an error occurs, we just close the socket and resume listening
-                                    let sock = match ssl.accept(sock) {
-                                        Ok(s) => s,
-                                        Err(_) => continue,
-                                    };
-
-                                    RefinedTcpStream::new(sock)
-                                }
-                                #[cfg(not(feature = "ssl"))]
-                                Some(_) => unreachable!(),
-                            };
-
+                            let (read_closable, write_closable) = RefinedTcpStream::new(sock);
                             Ok(ClientConnection::new(write_closable, read_closable))
                         }
                         Err(e) => Err(e),
@@ -326,17 +233,8 @@ impl Server {
                             let mut client = Some(client);
 
                             if let Some(client) = client.take() {
-                                // Synchronization is needed for HTTPS requests to avoid a deadlock
-                                if client.secure() {
-                                    let (sender, receiver) = mpsc::channel();
-                                    for rq in client {
-                                        messages.push(rq.with_notify_sender(sender.clone()).into());
-                                        receiver.recv().unwrap();
-                                    }
-                                } else {
-                                    for rq in client {
-                                        messages.push(rq.into());
-                                    }
+                                for rq in client {
+                                    messages.push(rq.into());
                                 }
                             }
                         }
