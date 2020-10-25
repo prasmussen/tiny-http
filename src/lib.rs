@@ -234,7 +234,7 @@ impl Server {
             let listener = net::TcpListener::bind(config.addr)?;
             let local_addr = listener.local_addr()?;
             debug!("Server listening on {}", local_addr);
-            (listener, local_addr)
+            (Arc::new(listener), local_addr)
         };
 
         // building the SSL capabilities
@@ -286,45 +286,45 @@ impl Server {
         // and ClientConnection objects are pushed in the messages queue
         let messages = MessagesQueue::with_capacity(8);
 
-        let inside_close_trigger = close_trigger.clone();
-        let inside_messages = messages.clone();
-        thread::spawn(move || {
-            // a tasks pool is used to dispatch the connections into threads
-            let tasks_pool = util::TaskPool::new();
+        // TODO: get thread count via config
+        for _ in 0..10 {
+            let server = server.clone();
+            let inside_close_trigger = close_trigger.clone();
+            let inside_messages = messages.clone();
 
-            debug!("Running accept thread");
-            while !inside_close_trigger.load(Relaxed) {
-                let new_client = match server.accept() {
-                    Ok((sock, _)) => {
-                        use util::RefinedTcpStream;
-                        let (read_closable, write_closable) = match ssl {
-                            None => RefinedTcpStream::new(sock),
-                            #[cfg(feature = "ssl")]
-                            Some(ref ssl) => {
-                                let ssl = openssl::ssl::Ssl::new(ssl).expect("Couldn't create ssl");
-                                // trying to apply SSL over the connection
-                                // if an error occurs, we just close the socket and resume listening
-                                let sock = match ssl.accept(sock) {
-                                    Ok(s) => s,
-                                    Err(_) => continue,
-                                };
+            thread::spawn(move || {
+                while !inside_close_trigger.load(Relaxed) {
+                    let new_client = match server.accept() {
+                        Ok((sock, _)) => {
+                            use util::RefinedTcpStream;
+                            let (read_closable, write_closable) = match ssl {
+                                None => RefinedTcpStream::new(sock),
+                                #[cfg(feature = "ssl")]
+                                Some(ref ssl) => {
+                                    let ssl = openssl::ssl::Ssl::new(ssl).expect("Couldn't create ssl");
+                                    // trying to apply SSL over the connection
+                                    // if an error occurs, we just close the socket and resume listening
+                                    let sock = match ssl.accept(sock) {
+                                        Ok(s) => s,
+                                        Err(_) => continue,
+                                    };
 
-                                RefinedTcpStream::new(sock)
-                            }
-                            #[cfg(not(feature = "ssl"))]
-                            Some(_) => unreachable!(),
-                        };
+                                    RefinedTcpStream::new(sock)
+                                }
+                                #[cfg(not(feature = "ssl"))]
+                                Some(_) => unreachable!(),
+                            };
 
-                        Ok(ClientConnection::new(write_closable, read_closable))
-                    }
-                    Err(e) => Err(e),
-                };
+                            Ok(ClientConnection::new(write_closable, read_closable))
+                        }
+                        Err(e) => Err(e),
+                    };
 
-                match new_client {
-                    Ok(client) => {
-                        let messages = inside_messages.clone();
-                        let mut client = Some(client);
-                        tasks_pool.spawn(Box::new(move || {
+                    match new_client {
+                        Ok(client) => {
+                            let messages = inside_messages.clone();
+                            let mut client = Some(client);
+
                             if let Some(client) = client.take() {
                                 // Synchronization is needed for HTTPS requests to avoid a deadlock
                                 if client.secure() {
@@ -339,18 +339,19 @@ impl Server {
                                     }
                                 }
                             }
-                        }));
-                    }
+                        }
 
-                    Err(e) => {
-                        error!("Error accepting new client: {}", e);
-                        inside_messages.push(e.into());
-                        break;
+                        Err(e) => {
+                            error!("Error accepting new client: {}", e);
+                            inside_messages.push(e.into());
+                            break;
+                        }
                     }
                 }
-            }
-            debug!("Terminating accept thread");
-        });
+                debug!("Terminating accept thread");
+            });
+
+        }
 
         // result
         Ok(Server {

@@ -4,7 +4,6 @@ pub use self::messages_queue::MessagesQueue;
 pub use self::refined_tcp_stream::RefinedTcpStream;
 pub use self::sequential::{SequentialReader, SequentialReaderBuilder};
 pub use self::sequential::{SequentialWriter, SequentialWriterBuilder};
-pub use self::task_pool::TaskPool;
 
 use std::str::FromStr;
 
@@ -13,7 +12,6 @@ mod equal_reader;
 mod messages_queue;
 mod refined_tcp_stream;
 mod sequential;
-mod task_pool;
 
 /// Parses a the value of a header.
 /// Suitable for `Accept-*`, `TE`, etc.
