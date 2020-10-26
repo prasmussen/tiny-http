@@ -1,6 +1,5 @@
 pub use self::custom_stream::CustomStream;
 pub use self::equal_reader::EqualReader;
-pub use self::messages_queue::MessagesQueue;
 pub use self::refined_tcp_stream::RefinedTcpStream;
 pub use self::sequential::{SequentialReader, SequentialReaderBuilder};
 pub use self::sequential::{SequentialWriter, SequentialWriterBuilder};
@@ -9,7 +8,6 @@ use std::str::FromStr;
 
 mod custom_stream;
 mod equal_reader;
-mod messages_queue;
 mod refined_tcp_stream;
 mod sequential;
 
