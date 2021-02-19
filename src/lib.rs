@@ -60,7 +60,8 @@ impl Server {
             .map_err(AcceptError::Accept)?;
 
         let (read_closable, write_closable) = RefinedTcpStream::new(socket);
-        Ok(ClientConnection::new(write_closable, read_closable))
+        ClientConnection::new(write_closable, read_closable)
+            .map_err(AcceptError::ClientConnection)
     }
 
     fn shutdown(&mut self) -> Result<(), ShutdownError> {
@@ -82,6 +83,7 @@ impl Server {
 #[derive(Debug)]
 pub enum AcceptError {
     Accept(io::Error),
+    ClientConnection(io::Error),
     ShuttingDown(),
 }
 

@@ -17,7 +17,7 @@ use Request;
 /// and return Request objects.
 pub struct ClientConnection {
     // address of the client
-    remote_addr: IoResult<SocketAddr>,
+    remote_addr: SocketAddr,
 
     // sequence of Readers to the stream, so that the data is not read in
     //  the wrong order
@@ -50,19 +50,19 @@ impl ClientConnection {
     pub fn new(
         write_socket: RefinedTcpStream,
         mut read_socket: RefinedTcpStream,
-    ) -> ClientConnection {
-        let remote_addr = read_socket.peer_addr();
+    ) -> IoResult<ClientConnection> {
+        let remote_addr = read_socket.peer_addr()?;
 
         let mut source = SequentialReaderBuilder::new(BufReader::with_capacity(1024, read_socket));
         let first_header = source.next().unwrap();
 
-        ClientConnection {
+        Ok(ClientConnection {
             source,
             sink: SequentialWriterBuilder::new(BufWriter::with_capacity(1024, write_socket)),
             remote_addr,
             next_header_source: first_header,
             no_more_requests: false,
-        }
+        })
     }
 
     /// Reads the next line from self.next_header_source.
@@ -141,7 +141,7 @@ impl ClientConnection {
             path,
             version.clone(),
             headers,
-            *self.remote_addr.as_ref().unwrap(),
+            self.remote_addr,
             data_source,
             writer,
         )
