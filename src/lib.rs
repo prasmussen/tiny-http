@@ -16,6 +16,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use client::ClientConnection;
+use client::ClientConnectionError;
 use util::RefinedTcpStream;
 
 pub use common::{HTTPVersion, Header, HeaderField, Method, StatusCode};
@@ -60,6 +61,7 @@ impl Server {
             .map_err(AcceptError::Accept)?;
 
         let (read_closable, write_closable) = RefinedTcpStream::new(socket);
+
         ClientConnection::new(write_closable, read_closable)
             .map_err(AcceptError::ClientConnection)
     }
@@ -83,7 +85,7 @@ impl Server {
 #[derive(Debug)]
 pub enum AcceptError {
     Accept(io::Error),
-    ClientConnection(io::Error),
+    ClientConnection(ClientConnectionError),
     ShuttingDown(),
 }
 

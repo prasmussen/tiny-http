@@ -45,16 +45,25 @@ enum ReadError {
     ReadIoError(IoError),
 }
 
+#[derive(Debug)]
+pub enum ClientConnectionError {
+    RemoteAddr(IoError),
+    ReadFirstHeader(),
+}
+
 impl ClientConnection {
     /// Creates a new ClientConnection that takes ownership of the TcpStream.
     pub fn new(
         write_socket: RefinedTcpStream,
         mut read_socket: RefinedTcpStream,
-    ) -> IoResult<ClientConnection> {
-        let remote_addr = read_socket.peer_addr()?;
+    ) -> Result<ClientConnection, ClientConnectionError> {
+        let remote_addr = read_socket.peer_addr()
+            .map_err(ClientConnectionError::RemoteAddr)?;
 
         let mut source = SequentialReaderBuilder::new(BufReader::with_capacity(1024, read_socket));
-        let first_header = source.next().unwrap();
+
+        let first_header = source.next()
+            .ok_or(ClientConnectionError::ReadFirstHeader())?;
 
         Ok(ClientConnection {
             source,
